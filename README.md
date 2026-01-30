@@ -24,6 +24,7 @@ Install the dependencies:
 npm install
 npm create vite@latest .
 npm install react-dropzone
+npm install tw-animate-css
 npm install pdf-poppler
 ```
 
