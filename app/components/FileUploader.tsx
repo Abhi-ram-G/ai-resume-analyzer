@@ -1,12 +1,13 @@
 import {useState, useCallback} from 'react'
 import {useDropzone} from 'react-dropzone'
-import { formatSize } from '../lib/utils'
+import { formatSize } from '~/lib/utils'
 
 interface FileUploaderProps {
     onFileSelect?: (file: File | null) => void;
+    id?: string;
 }
 
-const FileUploader = ({ onFileSelect }: FileUploaderProps) => {
+const FileUploader = ({ onFileSelect, id = 'file-uploader' }: FileUploaderProps) => {
     const onDrop = useCallback((acceptedFiles: File[]) => {
         const file = acceptedFiles[0] || null;
 
@@ -29,7 +30,7 @@ const FileUploader = ({ onFileSelect }: FileUploaderProps) => {
     return (
         <div className="w-full gradient-border">
             <div {...getRootProps()}>
-                <input {...getInputProps()} />
+                <input {...getInputProps()} id={id} />
 
                 <div className="space-y-4 cursor-pointer">
                     {file ? (

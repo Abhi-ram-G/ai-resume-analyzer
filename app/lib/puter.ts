@@ -119,7 +119,7 @@ export const usePuterStore = create<PuterStore>((set, get) => {
     const checkAuthStatus = async (): Promise<boolean> => {
         const puter = getPuter();
         if (!puter) {
-            setError("Puter.js not available");
+            // Don't set error during initial check as Puter.js might still be loading
             return false;
         }
 
@@ -158,9 +158,26 @@ export const usePuterStore = create<PuterStore>((set, get) => {
                 return false;
             }
         } catch (err) {
-            const msg =
-                err instanceof Error ? err.message : "Failed to check auth status";
-            setError(msg);
+            // 401 errors mean the user is not authenticated, which is expected for unauthenticated users
+            // Just set isAuthenticated to false without showing an error
+            const errorMsg = err instanceof Error ? err.message : "Failed to check auth status";
+            
+            if (errorMsg.includes("401") || errorMsg.includes("Unauthorized")) {
+                set({
+                    auth: {
+                        user: null,
+                        isAuthenticated: false,
+                        signIn: get().auth.signIn,
+                        signOut: get().auth.signOut,
+                        refreshUser: get().auth.refreshUser,
+                        checkAuthStatus: get().auth.checkAuthStatus,
+                        getUser: () => null,
+                    },
+                    isLoading: false,
+                });
+            } else {
+                setError(errorMsg);
+            }
             return false;
         }
     };
@@ -245,7 +262,10 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         const puter = getPuter();
         if (puter) {
             set({ puterReady: true });
-            checkAuthStatus();
+            // Add delay to ensure Puter.js is fully initialized
+            setTimeout(() => {
+                checkAuthStatus();
+            }, 1000);
             return;
         }
 
@@ -253,16 +273,19 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             if (getPuter()) {
                 clearInterval(interval);
                 set({ puterReady: true });
-                checkAuthStatus();
+                // Add delay to ensure Puter.js is fully initialized
+                setTimeout(() => {
+                    checkAuthStatus();
+                }, 1000);
             }
         }, 100);
 
         setTimeout(() => {
             clearInterval(interval);
             if (!getPuter()) {
-                setError("Puter.js failed to load within 10 seconds");
+                setError("Puter.js failed to load within 15 seconds");
             }
-        }, 10000);
+        }, 15000);
     };
 
     const write = async (path: string, data: string | File | Blob) => {
@@ -271,7 +294,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.fs.write(path, data);
+        try {
+            return await puter.fs.write(path, data);
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Write failed";
+            if (!errorMsg.includes("401")) {
+                setError(errorMsg);
+            }
+        }
     };
 
     const readDir = async (path: string) => {
@@ -280,7 +310,15 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.fs.readdir(path);
+        try {
+            return await puter.fs.readdir(path);
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Read directory failed";
+            if (!errorMsg.includes("401")) {
+                setError(errorMsg);
+            }
+            return undefined;
+        }
     };
 
     const readFile = async (path: string) => {
@@ -289,7 +327,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.fs.read(path);
+        try {
+            return await puter.fs.read(path);
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Read failed";
+            if (!errorMsg.includes("401")) {
+                setError(errorMsg);
+            }
+        }
     };
 
     const upload = async (files: File[] | Blob[]) => {
@@ -298,7 +343,17 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.fs.upload(files);
+        try {
+            return await puter.fs.upload(files);
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Upload failed";
+            if (errorMsg.includes("401") || errorMsg.includes("Unauthorized")) {
+                setError("Authentication required. Please sign in.");
+            } else {
+                setError(errorMsg);
+            }
+            return undefined;
+        }
     };
 
     const deleteFile = async (path: string) => {
@@ -307,7 +362,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.fs.delete(path);
+        try {
+            return await puter.fs.delete(path);
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Delete failed";
+            if (!errorMsg.includes("401")) {
+                setError(errorMsg);
+            }
+        }
     };
 
     const chat = async (
@@ -334,24 +396,36 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             return;
         }
 
-        return puter.ai.chat(
-            [
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "file",
-                            puter_path: path,
-                        },
-                        {
-                            type: "text",
-                            text: message,
-                        },
-                    ],
-                },
-            ],
-            { model: "claude-3-7-sonnet" }
-        ) as Promise<AIResponse | undefined>;
+        try {
+            const response = await puter.ai.chat(
+                [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "file",
+                                puter_path: path,
+                            },
+                            {
+                                type: "text",
+                                text: message,
+                            },
+                        ],
+                    },
+                ],
+                { model: "claude-sonnet-4" }
+            ) as Promise<AIResponse | undefined>;
+            
+            return response;
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Unknown error occurred";
+            if (errorMsg.includes("401")) {
+                setError("Authentication failed. Please sign in again.");
+            } else {
+                setError(`Failed to analyze resume: ${errorMsg}`);
+            }
+            throw err;
+        }
     };
 
     const img2txt = async (image: string | File | Blob, testMode?: boolean) => {
@@ -369,7 +443,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.kv.get(key);
+        try {
+            return await puter.kv.get(key);
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "KV get failed";
+            if (!errorMsg.includes("401")) {
+                setError(errorMsg);
+            }
+        }
     };
 
     const setKV = async (key: string, value: string) => {
@@ -378,7 +459,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.kv.set(key, value);
+        try {
+            return await puter.kv.set(key, value);
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "KV set failed";
+            if (!errorMsg.includes("401")) {
+                setError(errorMsg);
+            }
+        }
     };
 
     const deleteKV = async (key: string) => {
@@ -387,7 +475,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.kv.delete(key);
+        try {
+            return await puter.kv.delete(key);
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "KV delete failed";
+            if (!errorMsg.includes("401")) {
+                setError(errorMsg);
+            }
+        }
     };
 
     const listKV = async (pattern: string, returnValues?: boolean) => {
@@ -399,7 +494,15 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         if (returnValues === undefined) {
             returnValues = false;
         }
-        return puter.kv.list(pattern, returnValues);
+        try {
+            return await puter.kv.list(pattern, returnValues);
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "KV list failed";
+            if (!errorMsg.includes("401")) {
+                setError(errorMsg);
+            }
+            return undefined;
+        }
     };
 
     const flushKV = async () => {
@@ -408,7 +511,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.kv.flush();
+        try {
+            return await puter.kv.flush();
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "KV flush failed";
+            if (!errorMsg.includes("401")) {
+                setError(errorMsg);
+            }
+        }
     };
 
     return {

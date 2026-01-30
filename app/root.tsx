@@ -29,7 +29,51 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { init } = usePuterStore();
 
   useEffect(() => {
-    init()
+    // Suppress expected 401 errors from Puter.js
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    const suppressExpectedErrors = (...args: any[]) => {
+      const errorStr = JSON.stringify(args);
+      // Suppress all 401/Unauthorized errors from Puter API calls - these are expected during auth checks
+      if (errorStr.includes("401") || errorStr.includes("Unauthorized")) {
+        return;
+      }
+      originalError.apply(console, args);
+    };
+    
+    const suppressExpectedWarnings = (...args: any[]) => {
+      const warnStr = JSON.stringify(args);
+      if (warnStr.includes("401") || warnStr.includes("Unauthorized")) {
+        return;
+      }
+      originalWarn.apply(console, args);
+    };
+    
+    console.error = suppressExpectedErrors as any;
+    console.warn = suppressExpectedWarnings as any;
+
+    // Also suppress network errors for 401 responses at the fetch level
+    const originalFetch = window.fetch;
+    window.fetch = function(...args: any[]) {
+      return originalFetch.apply(window, args).catch((error) => {
+        // Don't suppress the error, just let it pass through
+        // The error handling in puter.ts will deal with it
+        throw error;
+      });
+    };
+
+    // Wait for Puter.js to load before initializing
+    const timeout = setTimeout(() => {
+      init();
+    }, 500);
+    
+    return () => {
+      clearTimeout(timeout);
+      console.error = originalError;
+      console.warn = originalWarn;
+      window.fetch = originalFetch;
+    };
   }, [init]);
 
   return (
@@ -39,9 +83,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
+        <script src="https://js.puter.com/v2/"></script>
       </head>
-      <body>
-      <script src="https://js.puter.com/v2/"></script>
+      <body suppressHydrationWarning>
       {children}
       <ScrollRestoration />
       <Scripts />
