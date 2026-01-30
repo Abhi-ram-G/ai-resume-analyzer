@@ -22,6 +22,9 @@ Install the dependencies:
 
 ```bash
 npm install
+npm create vite@latest .
+npm install react-dropzone
+npm install pdf-poppler
 ```
 
 ### Development
